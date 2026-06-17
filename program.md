@@ -96,7 +96,7 @@ LOOP FOREVER:
 1. Look at the git state: the current branch/commit we're on
 2. Tune `train.py` with an experimental idea by directly hacking the code.
 3. git commit
-4. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
+4. Run the experiment: `./scripts/llama_cpp_controller.sh stop && uv run train.py > run.log 2>&1 && ./scripts/llama_cpp_controller.sh start` (stop the GPU-based llama-server to free up VRAM, run training, and restart the server afterwards; redirect everything — do NOT use tee or let output flood your context)
 5. Read out the results: `grep "^val_bpb:\|^peak_vram_mb:" run.log`
 6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
 7. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
@@ -112,3 +112,13 @@ The idea is that you are a completely autonomous researcher trying things out. I
 **NEVER STOP**: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working *indefinitely* until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
 
 As an example use case, a user might leave you running while they sleep. If each experiment takes you ~5 minutes then you can run approx 12/hour, for a total of about 100 over the duration of the average human sleep. The user then wakes up to experimental results, all completed by you while they slept!
+
+## Stopping the experiment loop / GPU memory management
+
+When you run any function that needs the GPU, remember to run it in the following format:
+
+```bash
+./scripts/llama_cpp_controller.sh stop && process && ./scripts/llama_cpp_controller.sh start
+```
+
+This stops the background llama-server/LLM process to free up VRAM during execution, and starts it back up after it finishes. You must use this format for any GPU-intensive steps.
