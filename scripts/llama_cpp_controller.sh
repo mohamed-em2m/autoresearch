@@ -7,9 +7,9 @@ warn() { echo -e "\e[33m[WARN]\e[0m $*"; }
 success() { echo -e "\e[32m[SUCCESS]\e[0m $*"; }
 
 # Environment Defaults
-MODEL_NAME="${MODEL_NAME:-unsloth/gemma-4-31B-it-GGUF:UD-IQ2_M}"
-LLAMA_SERVER_PORT="${LLAMA_SERVER_PORT:-8080}"
-LLAMA_SERVER_HOST="${LLAMA_SERVER_HOST:-127.0.0.1}"
+MODEL_NAME="${MODEL_NAME:-unsloth/gemma-4-26B-A4B-it-GGUF:UD-IQ2_M}"
+LLAMA_SERVER_PORT="${LLAMA_SERVER_PORT:-8081}"
+LLAMA_SERVER_HOST="${LLAMA_SERVER_HOST:-0.0.0.0}"
 AUTO_CTX="${AUTO_CTX:-204800}"
 AUTO_NP="${AUTO_NP:-1}"
 AUTO_THREADS="${AUTO_THREADS:-16}"
@@ -81,8 +81,8 @@ run_model() {
         --mmap
         --cache-prompt
         --slot-save-path ./cache_dir
-        --cache-type-k q8_0
-        --cache-type-v q8_0
+        --cache-type-k q4_0
+        --cache-type-v q4_0
         --cache-reuse 0.7
         # --reasoning-budget 1000
         --flash-attn on
@@ -103,7 +103,7 @@ run_model() {
         local server_pid=$!
         info "llama-server started in background (PID: $server_pid). Logs: ./logs/api-server.log"
     else
-        exec llama-server "${llama_args[@]}"
+        llama-server "${llama_args[@]}"
     fi
 
     # Optional quick health check
@@ -149,7 +149,7 @@ case "$Stage" in
         run_model "$@"
         ;;
     *)
-        warn "Unknown action: $Stage. Usage: $0 {start|stop|restart} [model] [is_hidden] [port] [is_mtp]"
+        warn "Unknown action: $Stage. Usage: $0 {start|stop|restart} [is_hidden] [model] [port] [is_mtp]"
         exit 1
         ;;
 esac
