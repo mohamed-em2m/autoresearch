@@ -96,7 +96,7 @@ LOOP FOREVER:
 1. Look at the git state: the current branch/commit we're on
 2. Tune `train.py` with an experimental idea by directly hacking the code.
 3. git commit
-4. Run the experiment: `./scripts/llama_cpp_controller.sh stop && uv run train.py > run.log 2>&1 && ./scripts/llama_cpp_controller.sh start` (stop the GPU-based llama-server to free up VRAM, run training, and restart the server afterwards; redirect everything — do NOT use tee or let output flood your context)
+4. Run the experiment: `uv run train.py > run.log 2>&1` (the training script automatically stops/restarts the inference server based on `config.yaml` — no manual wrapping needed)
 5. Read out the results: `grep "^val_bpb:\|^peak_vram_mb:" run.log`
 6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
 7. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
@@ -113,12 +113,63 @@ The idea is that you are a completely autonomous researcher trying things out. I
 
 As an example use case, a user might leave you running while they sleep. If each experiment takes you ~5 minutes then you can run approx 12/hour, for a total of about 100 over the duration of the average human sleep. The user then wakes up to experimental results, all completed by you while they slept!
 
-## Stopping the experiment loop / GPU memory management
+## Inference server / GPU memory management
 
-When you run any function that needs the GPU, remember to run it in the following format:
+`inference_server.py` is a **reusable CLI + Python layer** that stops and restarts any GPU inference server on demand. It reads its configuration from `config.yaml`.
+
+**Use it directly** — any time you need to free VRAM for a GPU-heavy task:
 
 ```bash
-./scripts/llama_cpp_controller.sh stop && process && ./scripts/llama_cpp_controller.sh start
+python inference_server.py --stop     # free VRAM before a GPU task
+python inference_server.py --start    # bring the server back up
+python inference_server.py --restart  # stop then start in one command
 ```
 
-This stops the background llama-server/LLM process to free up VRAM during execution, and starts it back up after it finishes. You must use this format for any GPU-intensive steps.
+Wrap any GPU task safely so the server always restarts, even on failure:
+
+```bash
+python inference_server.py --stop && <your GPU command here> ; python inference_server.py --start
+```
+
+The `;` (not `&&`) before `--start` ensures the server always comes back up.
+
+**For training**, `train.py` already calls `InferenceServer` internally — stop/start is automatic. Just run:
+
+```bash
+uv run train.py > run.log 2>&1
+```
+
+**The three layers (inner → outer):**
+
+| Layer | Who calls it | What it does |
+|---|---|---|
+| `scripts/llama_cpp_controller.sh` | `config.yaml` `stop/start_command` | Directly kills / spawns the server process |
+| `inference_server.py` | Agent CLI or Python API | Reads config, runs commands with timeout + fail-safe |
+| `train.py` | `uv run train.py` | Calls `InferenceServer.from_config()` automatically |
+
+**The server process outlives Python.** It is backgrounded (`&`) inside the shell script and keeps running after Python exits — owned by the OS, not by `train.py`.
+
+Configure which server to manage in `config.yaml`:
+
+```yaml
+inference_server:
+  enabled: true
+  stop_before_training: true
+  restart_after_training: true
+  stop_command: "bash scripts/llama_cpp_controller.sh stop"
+  start_command: "bash scripts/llama_cpp_controller.sh start"
+  stop_timeout: 30     # seconds to wait for stop to finish
+  start_timeout: 120   # seconds to wait for the start script to return
+  fail_safe: true      # don't abort the GPU task if stop/start fails
+```
+
+Works with any inference library — just change the commands:
+
+| Library   | `stop_command`                               | `start_command`                                    |
+|-----------|----------------------------------------------|----------------------------------------------------|
+| llama.cpp | `bash scripts/llama_cpp_controller.sh stop`  | `bash scripts/llama_cpp_controller.sh start`       |
+| vLLM      | `pkill -f 'python -m vllm' \|\| true`        | `python -m vllm.entrypoints.openai.api_server ...` |
+| Ollama    | `systemctl stop ollama`                      | `systemctl start ollama`                           |
+| TGI       | `pkill -f text-generation-server \|\| true`  | `text-generation-launcher --model-id ...`          |
+
+Set `enabled: false` to disable the feature entirely (server is left untouched).
